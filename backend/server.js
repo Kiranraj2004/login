@@ -1,163 +1,100 @@
-// server.js
 const express = require('express');
 const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const cors = require('cors');
-
+const bcrypt = require('bcrypt');
 const app = express();
-const port = 5000;
+const port = 3000;
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 
 // MongoDB Connection
-mongoose.connect('mongodb://127.0.0.1:27017/auth_demo', {})
+mongoose.connect('mongodb://127.0.0.1:27017/emp', {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+})
     .then(() => console.log('MongoDB connected'))
     .catch(err => console.error('MongoDB connection error:', err));
 
 // User Schema
 const userSchema = new mongoose.Schema({
-    username: { 
-        type: String, 
-        required: true, 
-        unique: true 
+    name: {
+        type: String,
+        required: true,
+        unique: true,
+        trim: true,
     },
-    email: { 
-        type: String, 
-        required: true, 
-        unique: true 
+    email: {
+        type: String,
+        required: true,
+        unique: true,
+        lowercase: true,
+        trim: true,
     },
-    password: { 
-        type: String, 
-        required: true 
-    }
+    password: {
+        type: String,
+        required: true,
+    },
 }, { timestamps: true });
 
-const User = mongoose.model('User', userSchema);
+const User = mongoose.model('Logins', userSchema);
 
-// JWT Secret
-const JWT_SECRET = 'your-secret-key'; // In production, use environment variable
+// Root Route
+app.get('/', (req, res) => {
+    res.send('Hello, World!');
+});
 
 // Register Route
-app.post('/api/register', async (req, res) => {
+app.post('/register', async (req, res) => {
     try {
-        const { username, email, password } = req.body;
+        const { name, email, password } = req.body;
 
         // Check if user already exists
-        const existingUser = await User.findOne({ 
-            $or: [{ email }, { username }] 
-        });
-        
+        const existingUser = await User.findOne({ email });
         if (existingUser) {
-            return res.status(400).json({ 
-                error: 'User already exists' 
-            });
+            return res.status(400).json({ error: 'Email already in use' });
         }
 
-        // Hash password
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(password, salt);
+        // Hash the password before saving
+        const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Create new user
-        const user = new User({
-            username,
-            email,
-            password: hashedPassword
-        });
-
-        await user.save();
-
-        // Create JWT token
-        const token = jwt.sign(
-            { userId: user._id },
-            JWT_SECRET,
-            { expiresIn: '1h' }
-        );
-
-        res.status(201).json({
-            message: 'User registered successfully',
-            token
-        });
-
-    } catch (error) {
-        res.status(500).json({
-            error: 'Error registering user',
-            details: error.message
-        });
+        // Create a new user
+        const newUser = await User.create({ name, email, password: hashedPassword });
+        console.log('User registered:', newUser);
+        res.status(201).json({ message: 'User registered successfully' });
+    } catch (err) {
+        console.error('Registration error:', err);
+        res.status(500).json({ error: 'Registration failed' });
     }
 });
 
 // Login Route
-app.post('/api/login', async (req, res) => {
+app.post('/login', async (req, res) => {
     try {
         const { username, password } = req.body;
 
-        // Find user
-        const user = await User.findOne({ username });
+        // Find user by name
+        const user = await User.findOne({ name: username });
         if (!user) {
-            return res.status(400).json({
-                error: 'User not found'
-            });
+            return res.status(404).json({ error: 'User not found' });
         }
 
-        // Verify password
-        const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) {
-            return res.status(400).json({
-                error: 'Invalid credentials'
-            });
+        // Compare passwords
+        const isPasswordValid = await bcrypt.compare(password, user.password);
+        if (!isPasswordValid) {
+            return res.status(401).json({ error: 'Invalid password' });
         }
 
-        // Create JWT token
-        const token = jwt.sign(
-            { userId: user._id },
-            JWT_SECRET,
-            { expiresIn: '1h' }
-        );
-
-        res.json({
-            message: 'Login successful',
-            token
-        });
-
-    } catch (error) {
-        res.status(500).json({
-            error: 'Error logging in',
-            details: error.message
-        });
+        console.log('User logged in:', user);
+        res.status(200).json({ message: 'Login successful', user });
+    } catch (err) {
+        console.error('Login error:', err);
+        res.status(500).json({ error: 'Login failed' });
     }
 });
 
-// Protected Route Example
-const authenticateToken = (req, res, next) => {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-
-    if (!token) {
-        return res.status(401).json({ error: 'Access denied' });
-    }
-
-    jwt.verify(token, JWT_SECRET, (err, user) => {
-        if (err) {
-            return res.status(403).json({ error: 'Invalid token' });
-        }
-        req.user = user;
-        next();
-    });
-};
-
-// Protected route example
-app.get('/api/profile', authenticateToken, async (req, res) => {
-    try {
-        const user = await User.findById(req.user.userId).select('-password');
-        res.json(user);
-    } catch (error) {
-        res.status(500).json({ error: 'Error fetching profile' });
-    }
-});
-
+// Start the Server
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
 });
